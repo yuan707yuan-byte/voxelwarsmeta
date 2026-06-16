@@ -1,0 +1,12 @@
+{
+  "name": "voxelwars-meta",
+  "version": "1.0.0",
+  "description": "VOXEL WARS Warrior NFT Metadata API for meta.voxelwars.io",
+  "main": "api/warrior/[id].js",
+  "dependencies": {
+    "ethers": "^5.7.2"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
