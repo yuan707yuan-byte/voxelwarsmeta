@@ -183,23 +183,44 @@ module.exports = async (req, res) => {
 
   try {
     const nft   = new ethers.Contract(NFT_ADDRESS, NFT_ABI, provider);
+
+    // Step 1: get the current owner of this token
     const owner = await nft.ownerOf(tokenId);
-    const stats = await nft.getPlayerStats(owner);
 
-    // Extract stats — support both named and positional access
-    const strength     = Number(stats.strength     ?? stats[0] ?? 8);
-    const dexterity    = Number(stats.dexterity    ?? stats[1] ?? 5);
-    const intelligence = Number(stats.intelligence ?? stats[2] ?? 3);
-    const level        = Number(stats.level        ?? stats[3] ?? 1);
-    const xp           = Number(stats.xp           ?? stats[4] ?? 0);
-    const xpToNext     = Number(stats.xpToNextLevel?? stats[5] ?? 100);
-    const kills        = Number(stats.kills        ?? stats[6] ?? 0);
-    const mintBlock    = Number(stats.mintBlock     ?? stats[7] ?? 0);
-    const seedRaw      = stats.seed                ?? stats[8] ?? '0x';
+    // Step 2: try to get stats — may fail if:
+    //   (a) NFT was transferred to a wallet that never played
+    //   (b) original owner transferred it before playing
+    // In that case we use deterministic fallback stats from tokenId seed.
+    let strength = 8, dexterity = 5, intelligence = 3;
+    let level = 1, xp = 0, xpToNext = 100, kills = 0, mintBlock = 0;
+    let seedHex = tokenId.toString(16).toUpperCase().padStart(6, '0');
+    let statsSource = 'fallback';
 
-    const seedHex  = seedRaw && seedRaw.length > 2
-      ? seedRaw.slice(2, 8).toUpperCase()
-      : tokenId.toString().padStart(6, '0');
+    try {
+      const stats = await nft.getPlayerStats(owner);
+      strength     = Number(stats.strength     ?? stats[0] ?? 8);
+      dexterity    = Number(stats.dexterity    ?? stats[1] ?? 5);
+      intelligence = Number(stats.intelligence ?? stats[2] ?? 3);
+      level        = Number(stats.level        ?? stats[3] ?? 1);
+      xp           = Number(stats.xp           ?? stats[4] ?? 0);
+      xpToNext     = Number(stats.xpToNextLevel?? stats[5] ?? 100);
+      kills        = Number(stats.kills        ?? stats[6] ?? 0);
+      mintBlock    = Number(stats.mintBlock     ?? stats[7] ?? 0);
+      const seedRaw = stats.seed ?? stats[8] ?? '0x';
+      if (seedRaw && seedRaw.length > 2) {
+        seedHex = seedRaw.slice(2, 8).toUpperCase();
+      }
+      statsSource = 'chain';
+    } catch (statsErr) {
+      // NFT holder has no warrior record — use deterministic seed from tokenId
+      // Stats are derived from tokenId so each warrior still looks unique
+      const t = tokenId;
+      strength     = 8  + (t * 7  % 17); // 8–24 range
+      dexterity    = 5  + (t * 11 % 14); // 5–18 range
+      intelligence = 3  + (t * 13 % 12); // 3–14 range
+      seedHex      = (t * 0xA3F2C1 % 0xFFFFFF).toString(16).toUpperCase().padStart(6, '0');
+      console.log(\`[warrior/\${tokenId}] stats fallback used — \${statsErr.message?.slice(0,60)}\`);
+    }
 
     // Build SVG image inline — no IPFS hosting needed
     const svg      = generateWarriorSVG(
@@ -212,7 +233,9 @@ module.exports = async (req, res) => {
 
     const metadata = {
       name:         `Warrior #${seedHex}`,
-      description:  `VOXEL WARS on-chain warrior on Abey Blockchain. Stats seeded permanently from block hash #${mintBlock}. Level ${level} warrior with ${kills} confirmed on-chain kills. Play at voxelwars.xyz.`,
+      description:  statsSource === 'chain'
+        ? `VOXEL WARS on-chain warrior on Abey Blockchain. Stats seeded permanently from block hash #${mintBlock}. Level ${level} warrior with ${kills} confirmed on-chain kills. Play at voxelwars.xyz.`
+        : `VOXEL WARS Warrior NFT #${tokenId} on Abey Blockchain. Stats derived from token seed. Connect at voxelwars.xyz to register and activate your warrior.`,
       image:        imageUri,
       external_url: `https://voxelwars.xyz`,
       attributes: [
@@ -249,12 +272,13 @@ module.exports = async (req, res) => {
       const backup  = new ethers.providers.JsonRpcProvider(RPC_BACKUP);
       const nft2    = new ethers.Contract(NFT_ADDRESS, NFT_ABI, backup);
       const owner2  = await nft2.ownerOf(tokenId);
-      const stats2  = await nft2.getPlayerStats(owner2);
+      let stats2 = null;
+      try { stats2 = await nft2.getPlayerStats(owner2); } catch(_) {}
 
-      const level2  = Number(stats2.level ?? stats2[3] ?? 1);
-      const kills2  = Number(stats2.kills ?? stats2[6] ?? 0);
-      const seedR2  = stats2.seed ?? stats2[8] ?? '0x';
-      const seedH2  = seedR2.length > 2 ? seedR2.slice(2,8).toUpperCase() : tokenId.toString().padStart(6,'0');
+      const level2  = stats2 ? Number(stats2.level ?? stats2[3] ?? 1) : 1;
+      const kills2  = stats2 ? Number(stats2.kills ?? stats2[6] ?? 0) : 0;
+      const seedR2  = stats2 ? (stats2.seed ?? stats2[8] ?? '0x') : '0x';
+      const seedH2  = seedR2 && seedR2.length > 2 ? seedR2.slice(2,8).toUpperCase() : tokenId.toString(16).toUpperCase().padStart(6,'0');
 
       const svg2    = generateWarriorSVG(tokenId, seedH2,
         Number(stats2[0]??8), Number(stats2[1]??5), Number(stats2[2]??3), level2, kills2);
