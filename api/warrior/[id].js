@@ -184,42 +184,50 @@ module.exports = async (req, res) => {
   try {
     const nft   = new ethers.Contract(NFT_ADDRESS, NFT_ABI, provider);
 
-    // Step 1: get the current owner of this token
-    const owner = await nft.ownerOf(tokenId);
+    // Step 1: Verify the token exists
+    await nft.ownerOf(tokenId);
 
-    // Step 2: try to get stats — may fail if:
-    //   (a) NFT was transferred to a wallet that never played
-    //   (b) original owner transferred it before playing
-    // In that case we use deterministic fallback stats from tokenId seed.
+    // Step 2: Find the ORIGINAL MINTER via the mint Transfer event
+    // Transfer from 0x0 → minter is the first event for every NFT.
+    // The warrior stats are permanently tied to the original minting wallet
+    // regardless of how many times the NFT has been transferred since.
     let strength = 8, dexterity = 5, intelligence = 3;
     let level = 1, xp = 0, xpToNext = 100, kills = 0, mintBlock = 0;
     let seedHex = tokenId.toString(16).toUpperCase().padStart(6, '0');
-    let statsSource = 'fallback';
 
+    const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+    const mintFilter   = nft.filters.Transfer(ZERO_ADDRESS, null, tokenId);
+
+    let minterAddress = null;
     try {
-      const stats = await nft.getPlayerStats(owner);
-      strength     = Number(stats.strength     ?? stats[0] ?? 8);
-      dexterity    = Number(stats.dexterity    ?? stats[1] ?? 5);
-      intelligence = Number(stats.intelligence ?? stats[2] ?? 3);
-      level        = Number(stats.level        ?? stats[3] ?? 1);
-      xp           = Number(stats.xp           ?? stats[4] ?? 0);
-      xpToNext     = Number(stats.xpToNextLevel?? stats[5] ?? 100);
-      kills        = Number(stats.kills        ?? stats[6] ?? 0);
-      mintBlock    = Number(stats.mintBlock     ?? stats[7] ?? 0);
-      const seedRaw = stats.seed ?? stats[8] ?? '0x';
-      if (seedRaw && seedRaw.length > 2) {
-        seedHex = seedRaw.slice(2, 8).toUpperCase();
+      const mintEvents = await nft.queryFilter(mintFilter);
+      if (mintEvents.length > 0) {
+        minterAddress = mintEvents[0].args.to;
       }
-      statsSource = 'chain';
-    } catch (statsErr) {
-      // NFT holder has no warrior record — use deterministic seed from tokenId
-      // Stats are derived from tokenId so each warrior still looks unique
-      const t = tokenId;
-      strength     = 8  + (t * 7  % 17); // 8–24 range
-      dexterity    = 5  + (t * 11 % 14); // 5–18 range
-      intelligence = 3  + (t * 13 % 12); // 3–14 range
-      seedHex      = (t * 0xA3F2C1 % 0xFFFFFF).toString(16).toUpperCase().padStart(6, '0');
-      console.log('[warrior/' + tokenId + '] stats fallback used: ' + (statsErr.message || '').slice(0, 60));
+    } catch (_) {}
+
+    // Step 3: Get stats from original minter wallet
+    // This works whether the NFT has been transferred or not — the stats
+    // belong to the minter's game record, not the current holder's wallet.
+    if (minterAddress) {
+      try {
+        const stats  = await nft.getPlayerStats(minterAddress);
+        strength     = Number(stats.strength      ?? stats[0] ?? 8);
+        dexterity    = Number(stats.dexterity     ?? stats[1] ?? 5);
+        intelligence = Number(stats.intelligence  ?? stats[2] ?? 3);
+        level        = Number(stats.level         ?? stats[3] ?? 1);
+        xp           = Number(stats.xp            ?? stats[4] ?? 0);
+        xpToNext     = Number(stats.xpToNextLevel ?? stats[5] ?? 100);
+        kills        = Number(stats.kills         ?? stats[6] ?? 0);
+        mintBlock    = Number(stats.mintBlock      ?? stats[7] ?? 0);
+        const seedRaw = stats.seed ?? stats[8] ?? '0x';
+        if (seedRaw && seedRaw.length > 2) {
+          seedHex = seedRaw.slice(2, 8).toUpperCase();
+        }
+      } catch (statsErr) {
+        // Minter registered but stats call failed — use token-derived seed
+        console.log('[warrior/' + tokenId + '] stats error: ' + (statsErr.message || '').slice(0, 60));
+      }
     }
 
     // Build SVG image inline — no IPFS hosting needed
@@ -233,9 +241,7 @@ module.exports = async (req, res) => {
 
     const metadata = {
       name:         `Warrior #${seedHex}`,
-      description:  statsSource === 'chain'
-        ? `VOXEL WARS on-chain warrior on Abey Blockchain. Stats seeded permanently from block hash #${mintBlock}. Level ${level} warrior with ${kills} confirmed on-chain kills. Play at voxelwars.xyz.`
-        : `VOXEL WARS Warrior NFT #${tokenId} on Abey Blockchain. Stats derived from token seed. Connect at voxelwars.xyz to register and activate your warrior.`,
+      description:  `VOXEL WARS on-chain warrior on Abey Blockchain. Stats seeded permanently from block hash #${mintBlock}. Level ${level} warrior with ${kills} confirmed on-chain kills. Play at voxelwars.xyz.`,
       image:        imageUri,
       external_url: `https://voxelwars.xyz`,
       attributes: [
@@ -271,10 +277,16 @@ module.exports = async (req, res) => {
     try {
       const backup  = new ethers.providers.JsonRpcProvider(RPC_BACKUP);
       const nft2    = new ethers.Contract(NFT_ADDRESS, NFT_ABI, backup);
-      const owner2  = await nft2.ownerOf(tokenId);
+      await nft2.ownerOf(tokenId);
+      let minter2 = null;
+      try {
+        const evts2 = await nft2.queryFilter(
+          nft2.filters.Transfer('0x0000000000000000000000000000000000000000', null, tokenId)
+        );
+        if (evts2.length > 0) minter2 = evts2[0].args.to;
+      } catch(_) {}
       let stats2 = null;
-      try { stats2 = await nft2.getPlayerStats(owner2); } catch(_) {}
-
+      if (minter2) { try { stats2 = await nft2.getPlayerStats(minter2); } catch(_) {} }
       const level2  = stats2 ? Number(stats2.level ?? stats2[3] ?? 1) : 1;
       const kills2  = stats2 ? Number(stats2.kills ?? stats2[6] ?? 0) : 0;
       const seedR2  = stats2 ? (stats2.seed ?? stats2[8] ?? '0x') : '0x';
