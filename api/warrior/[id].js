@@ -219,7 +219,7 @@ module.exports = async (req, res) => {
       dexterity    = 5  + (t * 11 % 14); // 5–18 range
       intelligence = 3  + (t * 13 % 12); // 3–14 range
       seedHex      = (t * 0xA3F2C1 % 0xFFFFFF).toString(16).toUpperCase().padStart(6, '0');
-      console.log(\`[warrior/\${tokenId}] stats fallback used — \${statsErr.message?.slice(0,60)}\`);
+      console.log('[warrior/' + tokenId + '] stats fallback used: ' + (statsErr.message || '').slice(0, 60));
     }
 
     // Build SVG image inline — no IPFS hosting needed
