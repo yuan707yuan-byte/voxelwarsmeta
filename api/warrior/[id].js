@@ -17,6 +17,7 @@ const NFT_ABI = [
   'function ownerOf(uint256 tokenId) view returns (address)',
   'function totalSupply() view returns (uint256)',
   'function getPlayerStats(address player) view returns (tuple(uint8 strength, uint8 dexterity, uint8 intelligence, uint8 level, uint256 xp, uint256 xpToNextLevel, uint256 kills, uint256 mintBlock, bytes32 seed))',
+  'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)',
 ];
 
 // ── AVATAR SYMBOLS (same as frontend) ───────────────────────────
