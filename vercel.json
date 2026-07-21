@@ -4,15 +4,28 @@
     {
       "source": "/warrior/:id",
       "destination": "/api/warrior/:id"
+    },
+    {
+      "source": "/image/:id",
+      "destination": "/api/image/:id"
     }
   ],
   "headers": [
     {
       "source": "/api/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin",  "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, OPTIONS" },
-        { "key": "Content-Type",                 "value": "application/json" }
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, OPTIONS"
+        },
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        }
       ]
     }
   ]
