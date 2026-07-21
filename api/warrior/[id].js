@@ -232,13 +232,8 @@ module.exports = async (req, res) => {
     }
 
     // Build SVG image inline — no IPFS hosting needed
-    const svg      = generateWarriorSVG(
-      tokenId, seedHex,
-      strength, dexterity, intelligence,
-      level, kills
-    );
-    const imageB64 = Buffer.from(svg).toString('base64');
-    const imageUri = `data:image/svg+xml;base64,${imageB64}`;
+    // Image served from dedicated public URL so marketplaces can display it
+    const imageUri = `https://meta.voxelwars.io/image/${tokenId}`;
 
     const metadata = {
       name:         `Warrior #${seedHex}`,
@@ -299,7 +294,7 @@ module.exports = async (req, res) => {
       return res.status(200).json({
         name:        `Warrior #${seedH2}`,
         description: `VOXEL WARS warrior on Abey Blockchain. Level ${level2}, ${kills2} kills.`,
-        image:       `data:image/svg+xml;base64,${Buffer.from(svg2).toString('base64')}`,
+        image:       `https://meta.voxelwars.io/image/${tokenId}`,
         external_url:'https://voxelwars.xyz',
         attributes: [
           { trait_type: 'Level', value: level2 },
