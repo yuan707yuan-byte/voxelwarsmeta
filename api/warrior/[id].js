@@ -1,14 +1,8 @@
 // api/warrior/[id].js
-// VOXEL WARS — Warrior NFT Metadata API
-// Deployed to meta.voxelwars.io
-// Called by Fantase and any NFT marketplace reading tokenURI(id)
-//
-// Returns ERC-721 standard JSON for each warrior, reading live
-// stats directly from the WarriorNFT contract on Abey Blockchain.
+// VOXEL WARS Metadata API — meta.voxelwars.io
 
 const { ethers } = require('ethers');
 
-// ── CONTRACT CONFIG ──────────────────────────────────────────────
 const NFT_ADDRESS = '0x278B7d52f3484F56AD0B6B3c12C67359295A4333';
 const RPC_URL     = 'https://interrpc.abeychain.com';
 const RPC_BACKUP  = 'https://rpc.abeychain.com';
@@ -17,13 +11,10 @@ const NFT_ABI = [
   'function ownerOf(uint256 tokenId) view returns (address)',
   'function totalSupply() view returns (uint256)',
   'function getPlayerStats(address player) view returns (tuple(uint8 strength, uint8 dexterity, uint8 intelligence, uint8 level, uint256 xp, uint256 xpToNextLevel, uint256 kills, uint256 mintBlock, bytes32 seed))',
-  'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)',
 ];
 
-// ── AVATAR SYMBOLS (same as frontend) ───────────────────────────
-const AVATARS = ['⚔', '🗡', '🔱', '⚡', '🔥', '💀', '🛡', '🏹'];
+const AVATARS = ['\u2694','\uD83D\uDDE1','\uD83D\uDD31','\u26A1','\uD83D\uDD25','\uD83D\uDC80','\uD83D\uDEE1','\uD83C\uDFF9'];
 
-// ── WARRIOR SVG GENERATOR ────────────────────────────────────────
 function generateWarriorSVG(tokenId, seedHex, str, dex, intel, level, kills) {
   const seed       = parseInt(seedHex, 16) || tokenId;
   const avatar     = AVATARS[seed % AVATARS.length];
@@ -159,153 +150,100 @@ function generateWarriorSVG(tokenId, seedHex, str, dex, intel, level, kills) {
 </svg>`;
 }
 
-// ── MAIN HANDLER ─────────────────────────────────────────────────
 module.exports = async (req, res) => {
-  // CORS — allow Fantase and any marketplace to read metadata
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Content-Type', 'application/json');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const { id } = req.query;
   const tokenId = parseInt(id);
-
   if (isNaN(tokenId) || tokenId < 1) {
     return res.status(400).json({ error: 'Invalid token ID' });
   }
 
-  let provider;
   try {
-    provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-  } catch (_) {
-    provider = new ethers.providers.JsonRpcProvider(RPC_BACKUP);
-  }
+    const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
+    const nft      = new ethers.Contract(NFT_ADDRESS, NFT_ABI, provider);
+    const owner    = await nft.ownerOf(tokenId);
 
-  try {
-    const nft   = new ethers.Contract(NFT_ADDRESS, NFT_ABI, provider);
-
-    // Step 1: Verify the token exists
-    await nft.ownerOf(tokenId);
-
-    // Step 2: Find the ORIGINAL MINTER via the mint Transfer event
-    // Transfer from 0x0 → minter is the first event for every NFT.
-    // The warrior stats are permanently tied to the original minting wallet
-    // regardless of how many times the NFT has been transferred since.
     let strength = 8, dexterity = 5, intelligence = 3;
     let level = 1, xp = 0, xpToNext = 100, kills = 0, mintBlock = 0;
     let seedHex = tokenId.toString(16).toUpperCase().padStart(6, '0');
 
-    const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
-    const mintFilter   = nft.filters.Transfer(ZERO_ADDRESS, null, tokenId);
-
-    let minterAddress = null;
     try {
-      const mintEvents = await nft.queryFilter(mintFilter);
-      if (mintEvents.length > 0) {
-        minterAddress = mintEvents[0].args.to;
-      }
-    } catch (_) {}
-
-    // Step 3: Get stats from original minter wallet
-    // This works whether the NFT has been transferred or not — the stats
-    // belong to the minter's game record, not the current holder's wallet.
-    if (minterAddress) {
-      try {
-        const stats  = await nft.getPlayerStats(minterAddress);
-        strength     = Number(stats.strength      ?? stats[0] ?? 8);
-        dexterity    = Number(stats.dexterity     ?? stats[1] ?? 5);
-        intelligence = Number(stats.intelligence  ?? stats[2] ?? 3);
-        level        = Number(stats.level         ?? stats[3] ?? 1);
-        xp           = Number(stats.xp            ?? stats[4] ?? 0);
-        xpToNext     = Number(stats.xpToNextLevel ?? stats[5] ?? 100);
-        kills        = Number(stats.kills         ?? stats[6] ?? 0);
-        mintBlock    = Number(stats.mintBlock      ?? stats[7] ?? 0);
-        const seedRaw = stats.seed ?? stats[8] ?? '0x';
-        if (seedRaw && seedRaw.length > 2) {
-          seedHex = seedRaw.slice(2, 8).toUpperCase();
-        }
-      } catch (statsErr) {
-        // Minter registered but stats call failed — use token-derived seed
-        console.log('[warrior/' + tokenId + '] stats error: ' + (statsErr.message || '').slice(0, 60));
-      }
+      const stats  = await nft.getPlayerStats(owner);
+      strength     = Number(stats.strength      ?? stats[0] ?? 8);
+      dexterity    = Number(stats.dexterity     ?? stats[1] ?? 5);
+      intelligence = Number(stats.intelligence  ?? stats[2] ?? 3);
+      level        = Number(stats.level         ?? stats[3] ?? 1);
+      xp           = Number(stats.xp            ?? stats[4] ?? 0);
+      xpToNext     = Number(stats.xpToNextLevel ?? stats[5] ?? 100);
+      kills        = Number(stats.kills         ?? stats[6] ?? 0);
+      mintBlock    = Number(stats.mintBlock      ?? stats[7] ?? 0);
+      const seedRaw = stats.seed ?? stats[8] ?? '0x';
+      if (seedRaw && seedRaw.length > 2) seedHex = seedRaw.slice(2, 8).toUpperCase();
+    } catch (_) {
+      const t  = tokenId;
+      strength     = 8  + (t * 7  % 17);
+      dexterity    = 5  + (t * 11 % 14);
+      intelligence = 3  + (t * 13 % 12);
+      seedHex      = (t * 0xA3F2C1 % 0xFFFFFF).toString(16).toUpperCase().padStart(6, '0');
     }
-
-    // Build SVG image inline — no IPFS hosting needed
-    // Image served from dedicated public URL so marketplaces can display it
-    const imageUri = `https://meta.voxelwars.io/image/${tokenId}`;
 
     const metadata = {
       name:         `Warrior #${seedHex}`,
-      description:  `VOXEL WARS on-chain warrior on Abey Blockchain. Stats seeded permanently from block hash #${mintBlock}. Level ${level} warrior with ${kills} confirmed on-chain kills. Play at voxelwars.xyz.`,
-      image:        imageUri,
-      external_url: `https://voxelwars.xyz`,
+      description:  `VOXEL WARS on-chain warrior on Abey Blockchain. Stats seeded from block hash #${mintBlock}. Level ${level} warrior with ${kills} kills. Play at voxelwars.xyz.`,
+      image:        `https://meta.voxelwars.io/image/${tokenId}`,
+      external_url: 'https://voxelwars.xyz',
       attributes: [
-        { trait_type: 'Strength',      value: strength     },
-        { trait_type: 'Dexterity',     value: dexterity    },
-        { trait_type: 'Intelligence',  value: intelligence },
-        { trait_type: 'Level',         value: level        },
-        { trait_type: 'XP',            value: xp           },
-        { trait_type: 'XP To Next',    value: xpToNext     },
-        { trait_type: 'Kills',         value: kills        },
-        { trait_type: 'Mint Block',    value: mintBlock,   display_type: 'number' },
-        { trait_type: 'Seed',          value: seedHex      },
+        { trait_type: 'Strength',     value: strength     },
+        { trait_type: 'Dexterity',    value: dexterity    },
+        { trait_type: 'Intelligence', value: intelligence },
+        { trait_type: 'Level',        value: level        },
+        { trait_type: 'XP',           value: xp           },
+        { trait_type: 'XP To Next',   value: xpToNext     },
+        { trait_type: 'Kills',        value: kills        },
+        { trait_type: 'Mint Block',   value: mintBlock, display_type: 'number' },
+        { trait_type: 'Seed',         value: seedHex      },
       ]
     };
 
-    // Cache 5 minutes — stats change as players level up
-    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
+    res.setHeader('Cache-Control', 'public, max-age=300');
     return res.status(200).json(metadata);
 
   } catch (err) {
-    console.error(`[warrior/${tokenId}]`, err.message);
-
-    // Token does not exist
-    if (
-      err.message?.includes('nonexistent token') ||
-      err.message?.includes('invalid token ID') ||
-      err.message?.includes('ERC721: owner query')
-    ) {
+    if (err.message?.includes('nonexistent token') || err.message?.includes('ERC721')) {
       return res.status(404).json({ error: `Warrior #${tokenId} does not exist` });
     }
-
-    // RPC failure — retry with backup
     try {
-      const backup  = new ethers.providers.JsonRpcProvider(RPC_BACKUP);
-      const nft2    = new ethers.Contract(NFT_ADDRESS, NFT_ABI, backup);
-      await nft2.ownerOf(tokenId);
-      let minter2 = null;
-      try {
-        const evts2 = await nft2.queryFilter(
-          nft2.filters.Transfer('0x0000000000000000000000000000000000000000', null, tokenId)
-        );
-        if (evts2.length > 0) minter2 = evts2[0].args.to;
-      } catch(_) {}
-      let stats2 = null;
-      if (minter2) { try { stats2 = await nft2.getPlayerStats(minter2); } catch(_) {} }
-      const level2  = stats2 ? Number(stats2.level ?? stats2[3] ?? 1) : 1;
-      const kills2  = stats2 ? Number(stats2.kills ?? stats2[6] ?? 0) : 0;
-      const seedR2  = stats2 ? (stats2.seed ?? stats2[8] ?? '0x') : '0x';
-      const seedH2  = seedR2 && seedR2.length > 2 ? seedR2.slice(2,8).toUpperCase() : tokenId.toString(16).toUpperCase().padStart(6,'0');
-
-      const svg2    = generateWarriorSVG(tokenId, seedH2,
-        Number(stats2[0]??8), Number(stats2[1]??5), Number(stats2[2]??3), level2, kills2);
-
+      const backup = new ethers.providers.JsonRpcProvider(RPC_BACKUP);
+      const nft2   = new ethers.Contract(NFT_ADDRESS, NFT_ABI, backup);
+      const own2   = await nft2.ownerOf(tokenId);
+      let s2 = null;
+      try { s2 = await nft2.getPlayerStats(own2); } catch(_) {}
+      const lv2  = s2 ? Number(s2.level ?? s2[3] ?? 1) : 1;
+      const kl2  = s2 ? Number(s2.kills ?? s2[6] ?? 0) : 0;
+      const st2  = s2 ? Number(s2.strength ?? s2[0] ?? 8) : 8;
+      const dx2  = s2 ? Number(s2.dexterity ?? s2[1] ?? 5) : 5;
+      const in2  = s2 ? Number(s2.intelligence ?? s2[2] ?? 3) : 3;
+      const sr2  = s2 ? (s2.seed ?? s2[8] ?? '0x') : '0x';
+      const sh2  = sr2 && sr2.length > 2 ? sr2.slice(2,8).toUpperCase() : tokenId.toString(16).toUpperCase().padStart(6,'0');
       return res.status(200).json({
-        name:        `Warrior #${seedH2}`,
-        description: `VOXEL WARS warrior on Abey Blockchain. Level ${level2}, ${kills2} kills.`,
-        image:       `https://meta.voxelwars.io/image/${tokenId}`,
-        external_url:'https://voxelwars.xyz',
+        name: `Warrior #${sh2}`,
+        description: `VOXEL WARS warrior on Abey Blockchain. Level ${lv2}, ${kl2} kills.`,
+        image: `https://meta.voxelwars.io/image/${tokenId}`,
+        external_url: 'https://voxelwars.xyz',
         attributes: [
-          { trait_type: 'Level', value: level2 },
-          { trait_type: 'Kills', value: kills2 },
+          { trait_type: 'Strength',     value: st2 },
+          { trait_type: 'Dexterity',    value: dx2 },
+          { trait_type: 'Intelligence', value: in2 },
+          { trait_type: 'Level',        value: lv2 },
+          { trait_type: 'Kills',        value: kl2 },
         ]
       });
     } catch (_) {
-      return res.status(503).json({
-        error:   'Abey RPC temporarily unavailable',
-        details: err.message
-      });
+      return res.status(503).json({ error: 'Abey RPC temporarily unavailable', details: err.message });
     }
   }
 };
